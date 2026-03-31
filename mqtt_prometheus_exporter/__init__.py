@@ -28,17 +28,9 @@ from .store import init_store
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Store and HTTP server (initialised once at import time)
-# ---------------------------------------------------------------------------
-
 store = init_store(STORE_PATH)
 registry = make_registry(store)
 http_server, _http_thread = start_server(HTTP_HOST, HTTP_PORT, registry)
-
-# ---------------------------------------------------------------------------
-# Gourd app — gourd CLI calls app.run_forever(), owning the main thread
-# ---------------------------------------------------------------------------
 
 app = Gourd(
     MQTT_CLIENT_ID,
@@ -55,11 +47,6 @@ def _on_sigterm(signum: int, frame: object) -> None:
 
 
 signal.signal(signal.SIGTERM, _on_sigterm)
-
-
-# ---------------------------------------------------------------------------
-# Topic subscriptions
-# ---------------------------------------------------------------------------
 
 
 @app.subscribe('ping/#')

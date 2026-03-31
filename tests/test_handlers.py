@@ -19,11 +19,6 @@ def store(tmp_path):
     return init_store(str(tmp_path / 'store.json'))
 
 
-# ---------------------------------------------------------------------------
-# Ping handler
-# ---------------------------------------------------------------------------
-
-
 class TestHandlePing:
     def test_basic(self, store):
         payload = json.dumps({
@@ -61,11 +56,6 @@ class TestHandlePing:
             handle_ping(store, 'ping/8.8.8.8', json.dumps({'other': 1}).encode())
         assert len(store['metrics']) == 0
         assert caplog.records
-
-
-# ---------------------------------------------------------------------------
-# RTL_433 handler
-# ---------------------------------------------------------------------------
 
 
 class TestHandleRtl433:
@@ -116,11 +106,6 @@ class TestHandleRtl433:
         assert 'rtl433_humidity{channel="A",model="Tower",sensor="shed"}' in store['metrics']
 
 
-# ---------------------------------------------------------------------------
-# Zigbee2MQTT handler
-# ---------------------------------------------------------------------------
-
-
 class TestHandleZigbee2mqtt:
     def test_temperature_produces_c_and_f(self, store):
         payload = json.dumps({'temperature': 22.5}).encode()
@@ -157,11 +142,6 @@ class TestHandleZigbee2mqtt:
             handle_zigbee2mqtt(store, 'zigbee2mqtt/bedroom', b'not-json')
         assert len(store['metrics']) == 0
         assert caplog.records
-
-
-# ---------------------------------------------------------------------------
-# Weather handler
-# ---------------------------------------------------------------------------
 
 
 class TestHandleWeather:

@@ -71,16 +71,10 @@ ZIGBEE_FIELD_TTLS: dict[str, int] = {
     'voltage':      TTL_DEFAULT,
 }
 
-# ---------------------------------------------------------------------------
-# In-memory accumulator for weather minutely precipitation
-# ---------------------------------------------------------------------------
+WEATHER_TTL = 3600
 
 _minutely_precip_accumulator: float = 0.0
 
-
-# ---------------------------------------------------------------------------
-# Ping handler
-# ---------------------------------------------------------------------------
 
 def handle_ping(store: JsonBackedDict, topic: str, payload: bytes) -> None:
     """Handle messages on ``ping/#``."""
@@ -111,10 +105,6 @@ def handle_ping(store: JsonBackedDict, topic: str, payload: bytes) -> None:
             ttl=TTL_DEFAULT,
         )
 
-
-# ---------------------------------------------------------------------------
-# RTL_433 handler
-# ---------------------------------------------------------------------------
 
 def handle_rtl433(store: JsonBackedDict, topic: str, payload: bytes) -> None:
     """Handle messages on ``rtl_433/#``."""
@@ -182,10 +172,6 @@ def handle_rtl433(store: JsonBackedDict, topic: str, payload: bytes) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Zigbee2MQTT handler
-# ---------------------------------------------------------------------------
-
 def handle_zigbee2mqtt(store: JsonBackedDict, topic: str, payload: bytes) -> None:
     """Handle messages on ``zigbee2mqtt/<device>``."""
     # topic is e.g. "zigbee2mqtt/bedroom_sensor"
@@ -234,13 +220,6 @@ def handle_zigbee2mqtt(store: JsonBackedDict, topic: str, payload: bytes) -> Non
                 log.warning('zigbee2mqtt: non-numeric value for field %s in %s', field, topic)
                 continue
             store_metric(store, f'zigbee2mqtt_{field}', {'device': device}, value, ttl)
-
-
-# ---------------------------------------------------------------------------
-# Weather handler
-# ---------------------------------------------------------------------------
-
-WEATHER_TTL = 3600
 
 
 def handle_weather(store: JsonBackedDict, topic: str, payload: bytes) -> None:
