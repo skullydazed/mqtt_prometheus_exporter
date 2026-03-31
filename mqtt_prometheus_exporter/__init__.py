@@ -6,6 +6,7 @@ Gourd imports this package and calls ``app.run_forever()``, owning the main
 thread.  The Prometheus HTTP server runs in a separate daemon thread.
 """
 
+import functools
 import logging
 import signal
 
@@ -48,22 +49,7 @@ def _on_sigterm(signum: int, frame: object) -> None:
 
 signal.signal(signal.SIGTERM, _on_sigterm)
 
-
-@app.subscribe('ping/#')
-def on_ping(msg: object) -> None:
-    handle_ping(store, msg.topic, msg.payload)  # type: ignore[union-attr]
-
-
-@app.subscribe('rtl_433/#')
-def on_rtl433(msg: object) -> None:
-    handle_rtl433(store, msg.topic, msg.payload)  # type: ignore[union-attr]
-
-
-@app.subscribe('zigbee2mqtt/#')
-def on_zigbee2mqtt(msg: object) -> None:
-    handle_zigbee2mqtt(store, msg.topic, msg.payload)  # type: ignore[union-attr]
-
-
-@app.subscribe('weather/#')
-def on_weather(msg: object) -> None:
-    handle_weather(store, msg.topic, msg.payload)  # type: ignore[union-attr]
+app.subscribe('ping/#')(functools.partial(handle_ping, store))
+app.subscribe('rtl_433/#')(functools.partial(handle_rtl433, store))
+app.subscribe('zigbee2mqtt/#')(functools.partial(handle_zigbee2mqtt, store))
+app.subscribe('weather/#')(functools.partial(handle_weather, store))

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from typing import Protocol
 
 from json_backed_dict import JsonBackedDict
 
@@ -9,6 +10,11 @@ from .config import TTL_DEFAULT
 from .store import celsius_to_fahrenheit, coerce_bool, store_metric
 
 log = logging.getLogger(__name__)
+
+
+class _MqttMsg(Protocol):
+    topic: str
+    payload: bytes
 
 # ---------------------------------------------------------------------------
 # RTL_433 configuration
@@ -76,15 +82,15 @@ WEATHER_TTL = 3600
 _minutely_precip_accumulator: float = 0.0
 
 
-def handle_ping(store: JsonBackedDict, topic: str, payload: bytes) -> None:
+def handle_ping(store: JsonBackedDict, msg: _MqttMsg) -> None:
     """Handle messages on ``ping/#``."""
-    if topic == 'ping/status':
+    if msg.topic == 'ping/status':
         return
 
-    _, destination = topic.split('/', 1)
+    _, destination = msg.topic.split('/', 1)
 
     try:
-        data = json.loads(payload)
+        data = json.loads(msg.payload)
         last_1_min = data['last_1_min']
         stats = {
             'min':             last_1_min['min'],
@@ -93,7 +99,7 @@ def handle_ping(store: JsonBackedDict, topic: str, payload: bytes) -> None:
             'percent_dropped': last_1_min['percent_dropped'],
         }
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        log.warning('ping: failed to parse %s payload: %s', topic, exc)
+        log.warning('ping: failed to parse %s payload: %s', msg.topic, exc)
         return
 
     for stat, value in stats.items():
@@ -106,9 +112,9 @@ def handle_ping(store: JsonBackedDict, topic: str, payload: bytes) -> None:
         )
 
 
-def handle_rtl433(store: JsonBackedDict, topic: str, payload: bytes) -> None:
+def handle_rtl433(store: JsonBackedDict, msg: _MqttMsg) -> None:
     """Handle messages on ``rtl_433/#``."""
-    parts = topic.split('/')
+    parts = msg.topic.split('/')
 
     if len(parts) < 6 or parts[2] != 'devices':
         return  # silently skip malformed topics
@@ -149,14 +155,14 @@ def handle_rtl433(store: JsonBackedDict, topic: str, payload: bytes) -> None:
 
     # Parse and coerce the payload value
     try:
-        raw_value = payload.decode('utf-8').strip()
+        raw_value = msg.payload.decode('utf-8').strip()
         field_type = field_info['type']
         if field_type == 'bool':
             value = float(coerce_bool(raw_value))
         else:
             value = float(raw_value)
     except (ValueError, UnicodeDecodeError) as exc:
-        log.warning('rtl_433: failed to parse %s payload %r: %s', topic, payload, exc)
+        log.warning('rtl_433: failed to parse %s payload %r: %s', msg.topic, msg.payload, exc)
         return
 
     store_metric(store, name=f'rtl433_{field}', labels=labels, value=value, ttl=TTL_DEFAULT)
@@ -172,23 +178,23 @@ def handle_rtl433(store: JsonBackedDict, topic: str, payload: bytes) -> None:
         )
 
 
-def handle_zigbee2mqtt(store: JsonBackedDict, topic: str, payload: bytes) -> None:
+def handle_zigbee2mqtt(store: JsonBackedDict, msg: _MqttMsg) -> None:
     """Handle messages on ``zigbee2mqtt/<device>``."""
-    # topic is e.g. "zigbee2mqtt/bedroom_sensor"
-    parts = topic.split('/', 1)
+    # msg.topic is e.g. "zigbee2mqtt/bedroom_sensor"
+    parts = msg.topic.split('/', 1)
     if len(parts) < 2:
-        log.warning('zigbee2mqtt: unexpected topic format: %s', topic)
+        log.warning('zigbee2mqtt: unexpected topic format: %s', msg.topic)
         return
     device = parts[1]
 
     try:
-        data = json.loads(payload)
+        data = json.loads(msg.payload)
     except json.JSONDecodeError as exc:
-        log.warning('zigbee2mqtt: failed to parse %s payload: %s', topic, exc)
+        log.warning('zigbee2mqtt: failed to parse %s payload: %s', msg.topic, exc)
         return
 
     if not isinstance(data, dict):
-        log.warning('zigbee2mqtt: non-dict payload for %s', topic)
+        log.warning('zigbee2mqtt: non-dict payload for %s', msg.topic)
         return
 
     for field, ttl_default in ZIGBEE_FIELD_TTLS.items():
@@ -202,7 +208,7 @@ def handle_zigbee2mqtt(store: JsonBackedDict, topic: str, payload: bytes) -> Non
             try:
                 temp_c = float(raw)
             except (ValueError, TypeError):
-                log.warning('zigbee2mqtt: non-numeric temperature in %s', topic)
+                log.warning('zigbee2mqtt: non-numeric temperature in %s', msg.topic)
                 continue
             store_metric(store, 'zigbee2mqtt_temperature_C', {'device': device}, temp_c, ttl)
             store_metric(store, 'zigbee2mqtt_temperature_F', {'device': device}, celsius_to_fahrenheit(temp_c), ttl)
@@ -210,25 +216,25 @@ def handle_zigbee2mqtt(store: JsonBackedDict, topic: str, payload: bytes) -> Non
             try:
                 value = float(coerce_bool(raw))
             except ValueError:
-                log.warning('zigbee2mqtt: cannot coerce %r to bool for field %s in %s', raw, field, topic)
+                log.warning('zigbee2mqtt: cannot coerce %r to bool for field %s in %s', raw, field, msg.topic)
                 continue
             store_metric(store, f'zigbee2mqtt_{field}', {'device': device}, value, ttl)
         else:
             try:
                 value = float(raw)
             except (ValueError, TypeError):
-                log.warning('zigbee2mqtt: non-numeric value for field %s in %s', field, topic)
+                log.warning('zigbee2mqtt: non-numeric value for field %s in %s', field, msg.topic)
                 continue
             store_metric(store, f'zigbee2mqtt_{field}', {'device': device}, value, ttl)
 
 
-def handle_weather(store: JsonBackedDict, topic: str, payload: bytes) -> None:
+def handle_weather(store: JsonBackedDict, msg: _MqttMsg) -> None:
     """Handle messages on ``weather/<resolution>/<index>/<metric>``."""
     global _minutely_precip_accumulator
 
-    parts = topic.split('/')
+    parts = msg.topic.split('/')
     if len(parts) < 4:
-        log.warning('weather: unexpected topic format: %s', topic)
+        log.warning('weather: unexpected topic format: %s', msg.topic)
         return
 
     resolution = parts[1]
@@ -240,7 +246,7 @@ def handle_weather(store: JsonBackedDict, topic: str, payload: bytes) -> None:
 
     # Parse numeric payload; skip non-numeric silently
     try:
-        raw = payload.decode('utf-8').strip()
+        raw = msg.payload.decode('utf-8').strip()
         value = float(raw)
     except (ValueError, UnicodeDecodeError):
         return
