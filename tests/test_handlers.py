@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# We need to import the module under test
 import mqtt_prometheus_exporter as mpe
 
 # ---------------------------------------------------------------------------
@@ -17,10 +16,12 @@ import mqtt_prometheus_exporter as mpe
 
 
 @pytest.fixture
-def store(tmp_path):
-    """Return a fresh in-memory-backed JBD store for each test."""
+def store(tmp_path, monkeypatch):
+    """Provide a fresh JBD store for each test, patched into the module."""
     path = str(tmp_path / "store.json")
-    return mpe.init_store(path)
+    s = mpe.init_store(path)
+    monkeypatch.setattr(mpe, "store", s)
+    return s
 
 
 def make_msg(topic: str, payload: str | bytes | dict) -> MagicMock:
@@ -89,20 +90,20 @@ def test_make_metric_key_no_labels():
 
 def test_init_store_creates_structure(tmp_path):
     path = str(tmp_path / "store.json")
-    store = mpe.init_store(path)
-    assert "start_time" in store
-    assert "last_write" in store
-    assert "message_count" in store
-    assert "metrics" in store
-    assert store["metrics"] == {}
+    s = mpe.init_store(path)
+    assert "start_time" in s
+    assert "last_write" in s
+    assert "message_count" in s
+    assert "metrics" in s
+    assert s["metrics"] == {}
 
 
 def test_init_store_gc_expired(tmp_path):
     path = str(tmp_path / "store.json")
-    store = mpe.init_store(path)
+    s = mpe.init_store(path)
     # Write a metric that's already expired
     old_ts = time.time() - 1000
-    store["metrics"]["old_metric"] = {
+    s["metrics"]["old_metric"] = {
         "name": "old_metric",
         "labels": {},
         "ts": old_ts,
@@ -110,7 +111,7 @@ def test_init_store_gc_expired(tmp_path):
         "value": 1.0,
     }
     # A never-expiring metric
-    store["metrics"]["forever_metric"] = {
+    s["metrics"]["forever_metric"] = {
         "name": "forever_metric",
         "labels": {},
         "ts": old_ts,
@@ -132,7 +133,7 @@ def test_init_store_gc_expired(tmp_path):
 def test_ping_normal(store):
     payload = {"last_1_min": {"min": 1.0, "avg": 2.5, "max": 4.0, "percent_dropped": 0.0}}
     msg = make_msg("ping/8.8.8.8", payload)
-    mpe.handle_ping(msg, store)
+    mpe.handle_ping(msg)
 
     metrics = store["metrics"]
     assert 'ping_avg{destination="8.8.8.8"}' in metrics
@@ -144,26 +145,26 @@ def test_ping_normal(store):
 
 def test_ping_skip_status(store):
     msg = make_msg("ping/status", json.dumps({"last_1_min": {"min": 0}}))
-    mpe.handle_ping(msg, store)
+    mpe.handle_ping(msg)
     assert store["metrics"] == {}
 
 
 def test_ping_nested_destination(store):
     payload = {"last_1_min": {"min": 1.0, "avg": 2.0, "max": 3.0, "percent_dropped": 0.0}}
     msg = make_msg("ping/some/nested/host", payload)
-    mpe.handle_ping(msg, store)
+    mpe.handle_ping(msg)
     assert 'ping_avg{destination="some/nested/host"}' in store["metrics"]
 
 
 def test_ping_bad_json(store):
     msg = make_msg("ping/8.8.8.8", "not json")
-    mpe.handle_ping(msg, store)
+    mpe.handle_ping(msg)
     assert store["metrics"] == {}
 
 
 def test_ping_missing_keys(store):
     msg = make_msg("ping/8.8.8.8", {"other": "data"})
-    mpe.handle_ping(msg, store)
+    mpe.handle_ping(msg)
     assert store["metrics"] == {}
 
 
@@ -174,7 +175,7 @@ def test_ping_missing_keys(store):
 
 def test_rtl433_7part_temperature(store):
     msg = make_msg("rtl_433/mygateway/devices/Tower/A/42/temperature_C", "21.5")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
 
     metrics = store["metrics"]
     # shed is the friendly name for channel=A, id=42
@@ -189,7 +190,7 @@ def test_rtl433_7part_temperature(store):
 def test_rtl433_6part_defaults_main_channel(store):
     # 6 parts → channel defaults to 'main', id 111 → 'outdoor'
     msg = make_msg("rtl_433/mygateway/devices/GT-WT02/111/humidity", "55.0")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
 
     metrics = store["metrics"]
     key = 'rtl433_humidity{channel="main",model="GT-WT02",sensor="outdoor"}'
@@ -199,31 +200,31 @@ def test_rtl433_6part_defaults_main_channel(store):
 
 def test_rtl433_skip_non_forward_field(store):
     msg = make_msg("rtl_433/gw/devices/Tower/A/42/channel", "A")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
     assert store["metrics"] == {}
 
 
 def test_rtl433_skip_unknown_field(store):
     msg = make_msg("rtl_433/gw/devices/Tower/A/42/unknown_field", "1")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
     assert store["metrics"] == {}
 
 
 def test_rtl433_skip_fewer_than_6_parts(store):
     msg = make_msg("rtl_433/gw/devices/Tower", "1")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
     assert store["metrics"] == {}
 
 
 def test_rtl433_skip_wrong_3rd_element(store):
     msg = make_msg("rtl_433/gw/sensors/Tower/A/42/temperature_C", "20.0")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
     assert store["metrics"] == {}
 
 
 def test_rtl433_battery_ok_bool(store):
     msg = make_msg("rtl_433/gw/devices/Tower/A/42/battery_ok", "1")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
     key = 'rtl433_battery_ok{channel="A",model="Tower",sensor="shed"}'
     assert key in store["metrics"]
     assert store["metrics"][key]["value"] == 1.0
@@ -231,7 +232,7 @@ def test_rtl433_battery_ok_bool(store):
 
 def test_rtl433_unknown_sensor_uses_raw_id(store):
     msg = make_msg("rtl_433/gw/devices/Tower/A/9999/humidity", "70.0")
-    mpe.handle_rtl433(msg, store)
+    mpe.handle_rtl433(msg)
     key = 'rtl433_humidity{channel="A",model="Tower",sensor="9999"}'
     assert key in store["metrics"]
 
@@ -243,7 +244,7 @@ def test_rtl433_unknown_sensor_uses_raw_id(store):
 
 def test_zigbee_temperature(store):
     msg = make_msg("zigbee2mqtt/bedroom_sensor", {"temperature": 22.0})
-    mpe.handle_zigbee2mqtt(msg, store)
+    mpe.handle_zigbee2mqtt(msg)
 
     metrics = store["metrics"]
     c_key = 'zigbee2mqtt_temperature_C{device="bedroom_sensor"}'
@@ -256,7 +257,7 @@ def test_zigbee_temperature(store):
 
 def test_zigbee_bool_fields(store):
     msg = make_msg("zigbee2mqtt/sensor1", {"battery_low": "yes", "occupancy": "off", "tamper": False})
-    mpe.handle_zigbee2mqtt(msg, store)
+    mpe.handle_zigbee2mqtt(msg)
 
     metrics = store["metrics"]
     assert metrics['zigbee2mqtt_battery_low{device="sensor1"}']['value'] == 1.0
@@ -276,7 +277,7 @@ def test_zigbee_ttls(store):
             "voltage": 3.1,
         },
     )
-    mpe.handle_zigbee2mqtt(msg, store)
+    mpe.handle_zigbee2mqtt(msg)
 
     metrics = store["metrics"]
     assert metrics['zigbee2mqtt_battery{device="s1"}']['ttl'] == mpe.TTL_DEFAULT
@@ -289,7 +290,7 @@ def test_zigbee_ttls(store):
 
 def test_zigbee_non_json(store):
     msg = make_msg("zigbee2mqtt/sensor1", "not json")
-    mpe.handle_zigbee2mqtt(msg, store)
+    mpe.handle_zigbee2mqtt(msg)
     assert store["metrics"] == {}
 
 
@@ -300,32 +301,32 @@ def test_zigbee_non_json(store):
 
 def test_weather_daily_today(store):
     msg = make_msg("weather/daily/0/temp_max", "25.0")
-    mpe.handle_weather(msg, store)
+    mpe.handle_weather(msg)
     assert "weather_today_temp_max" in store["metrics"]
     assert store["metrics"]["weather_today_temp_max"]["value"] == 25.0
 
 
 def test_weather_daily_tomorrow(store):
     msg = make_msg("weather/daily/1/temp_max", "20.0")
-    mpe.handle_weather(msg, store)
+    mpe.handle_weather(msg)
     assert "weather_tomorrow_temp_max" in store["metrics"]
 
 
 def test_weather_daily_skip_other_index(store):
     msg = make_msg("weather/daily/2/temp_max", "18.0")
-    mpe.handle_weather(msg, store)
+    mpe.handle_weather(msg)
     assert store["metrics"] == {}
 
 
 def test_weather_dt_skipped(store):
     msg = make_msg("weather/dt/0/value", "12345")
-    mpe.handle_weather(msg, store)
+    mpe.handle_weather(msg)
     assert store["metrics"] == {}
 
 
 def test_weather_non_numeric_skipped(store):
     msg = make_msg("weather/daily/0/desc", "sunny")
-    mpe.handle_weather(msg, store)
+    mpe.handle_weather(msg)
     assert store["metrics"] == {}
 
 
@@ -334,16 +335,16 @@ def test_weather_minutely_precipitation_accumulates(store, monkeypatch):
     mpe._minutely_precip_accumulator.clear()
 
     msg0 = make_msg("weather/minutely/0/precipitation", "0.1")
-    mpe.handle_weather(msg0, store)
+    mpe.handle_weather(msg0)
     assert abs(store["metrics"]["weather_precipitation_next_hour"]["value"] - 0.1) < 1e-6
 
     msg1 = make_msg("weather/minutely/1/precipitation", "0.2")
-    mpe.handle_weather(msg1, store)
+    mpe.handle_weather(msg1)
     assert abs(store["metrics"]["weather_precipitation_next_hour"]["value"] - 0.3) < 1e-6
 
     # Index 0 resets accumulator
     msg0b = make_msg("weather/minutely/0/precipitation", "0.5")
-    mpe.handle_weather(msg0b, store)
+    mpe.handle_weather(msg0b)
     assert abs(store["metrics"]["weather_precipitation_next_hour"]["value"] - 0.5) < 1e-6
 
 
@@ -369,7 +370,7 @@ def test_collector_filters_expired(store):
         "value": 99.0,
     }
 
-    collector = mpe.MQTTCollector(store)
+    collector = mpe.MQTTCollector()
     results = list(collector.collect())
     names = [f.name for f in results]
     assert "live" in names
@@ -385,7 +386,7 @@ def test_collector_never_expire(store):
         "ttl": -1,
         "value": 7.0,
     }
-    collector = mpe.MQTTCollector(store)
+    collector = mpe.MQTTCollector()
     results = list(collector.collect())
     names = [f.name for f in results]
     assert "forever" in names

@@ -106,43 +106,35 @@ def make_metric_key(name: str, labels: dict[str, str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Store management
+# Store
 # ---------------------------------------------------------------------------
 
 
 def init_store(path: str) -> JsonBackedDict:
     """Load or create the JBD store, then garbage-collect expired metrics."""
-    store = JsonBackedDict(path)
+    s = JsonBackedDict(path)
 
-    if "start_time" not in store:
-        store["start_time"] = datetime.now()
-        store["last_write"] = datetime.now()
-        store["message_count"] = 0
-        store["metrics"] = {}
+    if "start_time" not in s:
+        s["start_time"] = datetime.now()
+        s["last_write"] = datetime.now()
+        s["message_count"] = 0
+        s["metrics"] = {}
 
     # GC: remove metrics that have exceeded their TTL
     now = time.time()
-    metrics = store["metrics"]
-    to_delete = []
-    for key, meta in metrics.items():
-        ttl = meta["ttl"]
-        if ttl != -1 and (now - meta["ts"]) > ttl:
-            to_delete.append(key)
+    to_delete = [
+        key for key, meta in s["metrics"].items()
+        if meta["ttl"] != -1 and (now - meta["ts"]) > meta["ttl"]
+    ]
     for key in to_delete:
-        del store["metrics"][key]
+        del s["metrics"][key]
         log.debug("GC: expired metric %s", key)
 
-    return store
+    return s
 
 
-def write_metric(
-    store: JsonBackedDict,
-    name: str,
-    labels: dict[str, str],
-    value: float,
-    ttl: int,
-) -> None:
-    """Write or update a single gauge metric in the JBD store."""
+def write_metric(name: str, labels: dict[str, str], value: float, ttl: int) -> None:
+    """Write or update a single gauge metric in the module-level store."""
     key = make_metric_key(name, labels)
     store["metrics"][key] = {
         "name": name,
@@ -156,29 +148,23 @@ def write_metric(
 
 
 # ---------------------------------------------------------------------------
-# Custom Prometheus Collector
+# Prometheus collector
 # ---------------------------------------------------------------------------
 
 
 class MQTTCollector:
-    """Reads from the JBD store and yields Prometheus metrics."""
-
-    def __init__(self, store: JsonBackedDict) -> None:
-        self._store = store
+    """Reads from the module-level store and yields Prometheus metrics."""
 
     def collect(self):  # noqa: ANN201
         now = time.time()
-        # Iterating the JBD creates an internal copy, so mutation is safe.
         grouped: dict[str, list[tuple[dict[str, str], float]]] = {}
-        for _key, meta in self._store["metrics"].items():
+        for _key, meta in store["metrics"].items():
             ttl = meta["ttl"]
             if ttl != -1 and (now - meta["ts"]) > ttl:
                 continue
-            name = meta["name"]
-            grouped.setdefault(name, []).append((dict(meta["labels"]), meta["value"]))
+            grouped.setdefault(meta["name"], []).append((dict(meta["labels"]), meta["value"]))
 
         for name, samples in grouped.items():
-            # Collect the full set of label names for this metric
             all_label_names: list[str] = []
             for labels, _ in samples:
                 for k in labels:
@@ -187,118 +173,113 @@ class MQTTCollector:
 
             g = GaugeMetricFamily(name, name, labels=all_label_names)
             for labels, value in samples:
-                label_values = [labels.get(k, "") for k in all_label_names]
-                g.add_metric(label_values, value)
+                g.add_metric([labels.get(k, "") for k in all_label_names], value)
             yield g
 
 
 # ---------------------------------------------------------------------------
-# MQTT message handlers
+# Module-level store and Prometheus setup
 # ---------------------------------------------------------------------------
 
+for _collector in (PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR):
+    try:
+        REGISTRY.unregister(_collector)
+    except Exception:
+        pass
 
-def handle_ping(msg, store: JsonBackedDict) -> None:
+store = init_store(STORE_PATH)
+REGISTRY.register(MQTTCollector())
+
+# ---------------------------------------------------------------------------
+# Gourd app and MQTT handlers
+# ---------------------------------------------------------------------------
+
+app = Gourd(
+    MQTT_CLIENT_ID,
+    mqtt_host=MQTT_HOST,
+    mqtt_port=MQTT_PORT,
+    username=MQTT_USER,
+    password=MQTT_PASS,
+    status_enabled=False,
+    log_mqtt=False,
+)
+
+
+@app.subscribe("ping/#")
+def handle_ping(msg) -> None:
     """Handle messages on ``ping/#``."""
-    topic: str = msg.topic
-    parts = topic.split("/", 1)
-    if len(parts) < 2:
+    parts = msg.topic.split("/", 1)
+    if len(parts) < 2 or parts[1] == "status":
         return
     destination = parts[1]
-
-    if destination == "status":
-        return
-
     try:
-        data = msg.json
-        last_1_min = data["last_1_min"]
+        last_1_min = msg.json["last_1_min"]
         for stat in ("min", "avg", "max", "percent_dropped"):
-            value = last_1_min[stat]
-            name = f"ping_{stat}"
-            write_metric(store, name, {"destination": destination}, float(value), TTL_DEFAULT)
+            write_metric(f"ping_{stat}", {"destination": destination}, float(last_1_min[stat]), TTL_DEFAULT)
     except (KeyError, TypeError, ValueError) as exc:
-        log.warning("ping handler: could not parse message on %s: %s", topic, exc)
+        log.warning("ping handler: could not parse message on %s: %s", msg.topic, exc)
 
 
-def handle_rtl433(msg, store: JsonBackedDict) -> None:
+@app.subscribe("rtl_433/#")
+def handle_rtl433(msg) -> None:
     """Handle messages on ``rtl_433/#``."""
-    topic: str = msg.topic
-    parts = topic.split("/")
-
-    # Must have 6 or 7 parts, and index 2 must be 'devices'
-    if len(parts) not in (6, 7):
-        return
-    if parts[2] != "devices":
+    parts = msg.topic.split("/")
+    if len(parts) not in (6, 7) or parts[2] != "devices":
         return
 
-    source = parts[1]  # noqa: F841
     if len(parts) == 7:
-        model = parts[3]
-        channel = parts[4]
-        sensor_id_raw = parts[5]
-        field = parts[6]
-    else:  # 6 parts
-        model = parts[3]
-        channel = "main"
-        sensor_id_raw = parts[4]
-        field = parts[5]
+        model, channel, sensor_id_raw, field = parts[3], parts[4], parts[5], parts[6]
+    else:
+        model, channel, sensor_id_raw, field = parts[3], "main", parts[4], parts[5]
 
-    # Check field registry
     field_info = RTL433_FIELD_REGISTRY.get(field)
     if not field_info or not field_info["forward"]:
         return
 
-    # Parse the numeric sensor ID
     try:
         sensor_id_num = int(sensor_id_raw)
     except ValueError:
         sensor_id_num = None
 
-    # Friendly name lookup
     if sensor_id_num is not None:
         sensor_name = RTL433_SENSOR_MAP.get((channel, sensor_id_num), sensor_id_raw)
     else:
         sensor_name = sensor_id_raw
 
-    # Parse payload value
     raw_payload = msg.payload.strip()
     try:
         value = float(raw_payload)
     except ValueError:
-        log.warning("rtl_433 handler: non-numeric payload on %s: %s", topic, raw_payload)
+        log.warning("rtl_433 handler: non-numeric payload on %s: %s", msg.topic, raw_payload)
         return
 
-    # Apply bool coercion if needed
     if field_info["type"] == "bool":
         coerced = coerce_bool(raw_payload)
         if coerced is None:
-            log.warning("rtl_433 handler: unrecognised bool value on %s: %s", topic, raw_payload)
+            log.warning("rtl_433 handler: unrecognised bool value on %s: %s", msg.topic, raw_payload)
             return
         value = float(coerced)
 
     labels = {"model": model, "channel": channel, "sensor": str(sensor_name)}
-    write_metric(store, f"rtl433_{field}", labels, value, TTL_DEFAULT)
-
-    # Auto-generate Fahrenheit for temperature_C
+    write_metric(f"rtl433_{field}", labels, value, TTL_DEFAULT)
     if field == "temperature_C":
-        fahrenheit = celsius_to_fahrenheit(value)
-        write_metric(store, "rtl433_temperature_F", labels, fahrenheit, TTL_DEFAULT)
+        write_metric("rtl433_temperature_F", labels, celsius_to_fahrenheit(value), TTL_DEFAULT)
 
 
-def handle_zigbee2mqtt(msg, store: JsonBackedDict) -> None:
+@app.subscribe("zigbee2mqtt/#")
+def handle_zigbee2mqtt(msg) -> None:
     """Handle messages on ``zigbee2mqtt/<device>``."""
-    topic: str = msg.topic
-    parts = topic.split("/", 1)
+    parts = msg.topic.split("/", 1)
     if len(parts) < 2 or not parts[1]:
-        log.warning("zigbee2mqtt handler: malformed topic %s", topic)
+        log.warning("zigbee2mqtt handler: malformed topic %s", msg.topic)
         return
-    device = parts[1]
 
+    device = parts[1]
     data = msg.json
     if not data:
-        log.warning("zigbee2mqtt handler: empty/non-JSON payload on %s", topic)
+        log.warning("zigbee2mqtt handler: empty/non-JSON payload on %s", msg.topic)
         return
 
-    # Field definitions: (json_key, metric_suffix, type, ttl)
     field_defs = [
         ("battery", "battery", "float", TTL_DEFAULT),
         ("battery_low", "battery_low", "bool", -1),
@@ -320,49 +301,42 @@ def handle_zigbee2mqtt(msg, store: JsonBackedDict) -> None:
         if field_type == "bool":
             coerced = coerce_bool(raw)
             if coerced is None:
-                log.warning("zigbee2mqtt handler: unrecognised bool %s=%r on %s", json_key, raw, topic)
+                log.warning("zigbee2mqtt handler: unrecognised bool %s=%r on %s", json_key, raw, msg.topic)
                 continue
-            value = float(coerced)
-            write_metric(store, f"zigbee2mqtt_{metric_suffix}", {"device": device}, value, ttl)
+            write_metric(f"zigbee2mqtt_{metric_suffix}", {"device": device}, float(coerced), ttl)
 
         elif field_type == "temp_c":
             try:
                 c_value = float(raw)
             except (TypeError, ValueError):
-                log.warning("zigbee2mqtt handler: non-numeric temperature on %s: %r", topic, raw)
+                log.warning("zigbee2mqtt handler: non-numeric temperature on %s: %r", msg.topic, raw)
                 continue
-            write_metric(store, "zigbee2mqtt_temperature_C", {"device": device}, c_value, ttl)
-            write_metric(store, "zigbee2mqtt_temperature_F", {"device": device}, celsius_to_fahrenheit(c_value), ttl)
+            write_metric("zigbee2mqtt_temperature_C", {"device": device}, c_value, ttl)
+            write_metric("zigbee2mqtt_temperature_F", {"device": device}, celsius_to_fahrenheit(c_value), ttl)
 
-        else:  # float
+        else:
             try:
-                value = float(raw)
+                write_metric(f"zigbee2mqtt_{metric_suffix}", {"device": device}, float(raw), ttl)
             except (TypeError, ValueError):
-                log.warning("zigbee2mqtt handler: non-numeric %s on %s: %r", json_key, topic, raw)
-                continue
-            write_metric(store, f"zigbee2mqtt_{metric_suffix}", {"device": device}, value, ttl)
+                log.warning("zigbee2mqtt handler: non-numeric %s on %s: %r", json_key, msg.topic, raw)
 
 
-# Accumulator for minutely precipitation; lives in memory, not in the JBD.
+# Accumulator for minutely precipitation; lives in memory, not in the store.
 _minutely_precip_accumulator: dict[str, float] = {}
 _minutely_precip_lock = threading.Lock()
 
 
-def handle_weather(msg, store: JsonBackedDict) -> None:
+@app.subscribe("weather/#")
+def handle_weather(msg) -> None:
     """Handle messages on ``weather/<resolution>/<index>/<metric>``."""
-    topic: str = msg.topic
-    parts = topic.split("/")
-
-    # Expected: weather/<resolution>/<index>/<metric>
+    parts = msg.topic.split("/")
     if len(parts) != 4:
         return
 
     _, resolution, index_str, metric = parts
-
     if resolution == "dt":
         return
 
-    # Only numeric payloads
     raw = msg.payload.strip()
     try:
         value = float(raw)
@@ -378,8 +352,7 @@ def handle_weather(msg, store: JsonBackedDict) -> None:
                 _minutely_precip_accumulator["__sum__"] = value
             else:
                 _minutely_precip_accumulator["__sum__"] = _minutely_precip_accumulator.get("__sum__", 0.0) + value
-            total = _minutely_precip_accumulator["__sum__"]
-            write_metric(store, "weather_precipitation_next_hour", {}, total, weather_ttl)
+            write_metric("weather_precipitation_next_hour", {}, _minutely_precip_accumulator["__sum__"], weather_ttl)
         return
 
     if resolution == "daily":
@@ -389,11 +362,10 @@ def handle_weather(msg, store: JsonBackedDict) -> None:
             period = "tomorrow"
         else:
             return
-        write_metric(store, f"weather_{period}_{metric}", {}, value, weather_ttl)
+        write_metric(f"weather_{period}_{metric}", {}, value, weather_ttl)
         return
 
-    # Other resolutions: emit directly (but skip minutely non-precipitation above)
-    write_metric(store, f"weather_{resolution}_{index_str}_{metric}", {}, value, weather_ttl)
+    write_metric(f"weather_{resolution}_{index_str}_{metric}", {}, value, weather_ttl)
 
 
 # ---------------------------------------------------------------------------
@@ -401,75 +373,23 @@ def handle_weather(msg, store: JsonBackedDict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def make_metrics_handler() -> type[BaseHTTPRequestHandler]:
-    """Return a request handler class that serves /metrics.
+class MetricsHandler(BaseHTTPRequestHandler):
+    """Serves ``/metrics`` in Prometheus text exposition format."""
 
-    Metrics are read from the module-level ``store`` via the ``MQTTCollector``
-    registered in ``REGISTRY`` at module import time.
-    """
+    def do_GET(self) -> None:
+        if self.path == "/metrics":
+            output = generate_latest(REGISTRY)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(output)))
+            self.end_headers()
+            self.wfile.write(output)
+        else:
+            self.send_response(404)
+            self.end_headers()
 
-    class MetricsHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            if self.path == "/metrics":
-                output = generate_latest(REGISTRY)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-                self.send_header("Content-Length", str(len(output)))
-                self.end_headers()
-                self.wfile.write(output)
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-        def log_message(self, format: str, *args: object) -> None:  # type: ignore[override]
-            log.debug("HTTP %s", format % args)
-
-    return MetricsHandler
-
-
-# ---------------------------------------------------------------------------
-# Module-level app and store
-# ---------------------------------------------------------------------------
-
-# Suppress default prometheus collectors
-for _collector in (PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR):
-    try:
-        REGISTRY.unregister(_collector)
-    except Exception:
-        pass
-
-store = init_store(STORE_PATH)
-REGISTRY.register(MQTTCollector(store))
-
-app = Gourd(
-    MQTT_CLIENT_ID,
-    mqtt_host=MQTT_HOST,
-    mqtt_port=MQTT_PORT,
-    username=MQTT_USER,
-    password=MQTT_PASS,
-    status_enabled=False,
-    log_mqtt=False,
-)
-
-
-@app.subscribe("ping/#")
-def on_ping(msg):
-    handle_ping(msg, store)
-
-
-@app.subscribe("rtl_433/#")
-def on_rtl433(msg):
-    handle_rtl433(msg, store)
-
-
-@app.subscribe("zigbee2mqtt/#")
-def on_zigbee(msg):
-    handle_zigbee2mqtt(msg, store)
-
-
-@app.subscribe("weather/#")
-def on_weather(msg):
-    handle_weather(msg, store)
+    def log_message(self, format: str, *args: object) -> None:  # type: ignore[override]
+        log.debug("HTTP %s", format % args)
 
 
 # ---------------------------------------------------------------------------
@@ -478,7 +398,6 @@ def on_weather(msg):
 
 
 def main() -> None:
-    # Shutdown coordination
     stop_event = threading.Event()
 
     def _signal_handler(signum: int, frame: object) -> None:
@@ -488,25 +407,16 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
-    # Start MQTT in background thread
     app.loop_start()
 
-    # Start HTTP server in background thread
-    handler_class = make_metrics_handler()
-    http_server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), handler_class)
-    http_thread = threading.Thread(target=http_server.serve_forever, daemon=True, name="http-server")
-    http_thread.start()
+    http_server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), MetricsHandler)
+    threading.Thread(target=http_server.serve_forever, daemon=True, name="http-server").start()
     log.info("HTTP /metrics available at http://%s:%d/metrics", HTTP_HOST, HTTP_PORT)
 
-    # Wait for shutdown signal
     stop_event.wait()
 
-    # Shutdown sequence:
-    # 1. Stop MQTT
     app.loop_stop()
-    # 2. Drain in-flight handlers
     time.sleep(0.5)
-    # 3. Stop HTTP server
     http_server.shutdown()
     log.info("Shutdown complete.")
 
