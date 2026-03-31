@@ -29,6 +29,7 @@ TTL_DEFAULT = int(os.environ.get("TTL_DEFAULT", "300"))
 HTTP_HOST = os.environ.get("HTTP_HOST", "127.0.0.1")
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "5023"))
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -400,8 +401,12 @@ def handle_weather(msg, store: JsonBackedDict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def make_metrics_handler(store: JsonBackedDict) -> type[BaseHTTPRequestHandler]:
-    """Return a request handler class that serves /metrics."""
+def make_metrics_handler() -> type[BaseHTTPRequestHandler]:
+    """Return a request handler class that serves /metrics.
+
+    Metrics are read from the module-level ``store`` via the ``MQTTCollector``
+    registered in ``REGISTRY`` at module import time.
+    """
 
     class MetricsHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -423,26 +428,56 @@ def make_metrics_handler(store: JsonBackedDict) -> type[BaseHTTPRequestHandler]:
 
 
 # ---------------------------------------------------------------------------
+# Module-level app and store
+# ---------------------------------------------------------------------------
+
+# Suppress default prometheus collectors
+for _collector in (PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR):
+    try:
+        REGISTRY.unregister(_collector)
+    except Exception:
+        pass
+
+store = init_store(STORE_PATH)
+REGISTRY.register(MQTTCollector(store))
+
+app = Gourd(
+    MQTT_CLIENT_ID,
+    mqtt_host=MQTT_HOST,
+    mqtt_port=MQTT_PORT,
+    username=MQTT_USER,
+    password=MQTT_PASS,
+    status_enabled=False,
+    log_mqtt=False,
+)
+
+
+@app.subscribe("ping/#")
+def on_ping(msg):
+    handle_ping(msg, store)
+
+
+@app.subscribe("rtl_433/#")
+def on_rtl433(msg):
+    handle_rtl433(msg, store)
+
+
+@app.subscribe("zigbee2mqtt/#")
+def on_zigbee(msg):
+    handle_zigbee2mqtt(msg, store)
+
+
+@app.subscribe("weather/#")
+def on_weather(msg):
+    handle_weather(msg, store)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-    # Suppress default prometheus collectors
-    for collector in (PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR):
-        try:
-            REGISTRY.unregister(collector)
-        except Exception:
-            pass
-
-    # Initialise the store
-    store = init_store(STORE_PATH)
-
-    # Register our custom collector
-    REGISTRY.register(MQTTCollector(store))
-
     # Shutdown coordination
     stop_event = threading.Event()
 
@@ -453,38 +488,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
-    # Build gourd app
-    app = Gourd(
-        MQTT_CLIENT_ID,
-        mqtt_host=MQTT_HOST,
-        mqtt_port=MQTT_PORT,
-        username=MQTT_USER,
-        password=MQTT_PASS,
-        status_enabled=False,
-        log_mqtt=False,
-    )
-
-    @app.subscribe("ping/#")
-    def on_ping(msg):
-        handle_ping(msg, store)
-
-    @app.subscribe("rtl_433/#")
-    def on_rtl433(msg):
-        handle_rtl433(msg, store)
-
-    @app.subscribe("zigbee2mqtt/#")
-    def on_zigbee(msg):
-        handle_zigbee2mqtt(msg, store)
-
-    @app.subscribe("weather/#")
-    def on_weather(msg):
-        handle_weather(msg, store)
-
     # Start MQTT in background thread
     app.loop_start()
 
     # Start HTTP server in background thread
-    handler_class = make_metrics_handler(store)
+    handler_class = make_metrics_handler()
     http_server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), handler_class)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True, name="http-server")
     http_thread.start()
