@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import mqtt_prometheus_exporter as mpe
+import mqtt_prometheus_exporter.store as _store_mod
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -20,7 +21,7 @@ def store(tmp_path, monkeypatch):
     """Provide a fresh JBD store for each test, patched into the module."""
     path = str(tmp_path / "store.json")
     s = mpe.init_store(path)
-    monkeypatch.setattr(mpe, "store", s)
+    monkeypatch.setattr(_store_mod, "store", s)
     return s
 
 
@@ -332,7 +333,7 @@ def test_weather_non_numeric_skipped(store):
 
 def test_weather_minutely_precipitation_accumulates(store, monkeypatch):
     # Reset accumulator before test
-    mpe._minutely_precip_accumulator.clear()
+    mpe.handlers._minutely_precip_accumulator.clear()
 
     msg0 = make_msg("weather/minutely/0/precipitation", "0.1")
     mpe.handle_weather(msg0)

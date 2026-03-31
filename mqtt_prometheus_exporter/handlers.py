@@ -1,35 +1,15 @@
-"""mqtt_prometheus_exporter — bridges MQTT and Prometheus."""
+"""MQTT message handlers and Gourd application."""
 
 from __future__ import annotations
 
 import logging
-import os
-import signal
 import threading
-import time
-from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from gourd import Gourd
-from json_backed_dict import JsonBackedDict
-from prometheus_client import GC_COLLECTOR, PLATFORM_COLLECTOR, PROCESS_COLLECTOR, REGISTRY, generate_latest
-from prometheus_client.metrics_core import GaugeMetricFamily
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+from .config import MQTT_CLIENT_ID, MQTT_HOST, MQTT_PASS, MQTT_PORT, MQTT_USER, TTL_DEFAULT
+from .store import write_metric
 
-MQTT_CLIENT_ID = os.environ.get("MQTT_CLIENT_ID", "mqtt_prometheus_exporter")
-MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
-MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
-MQTT_USER = os.environ.get("MQTT_USER", "")
-MQTT_PASS = os.environ.get("MQTT_PASS", "")
-STORE_PATH = os.environ.get("STORE_PATH", "store.json")
-TTL_DEFAULT = int(os.environ.get("TTL_DEFAULT", "300"))
-HTTP_HOST = os.environ.get("HTTP_HOST", "127.0.0.1")
-HTTP_PORT = int(os.environ.get("HTTP_PORT", "5023"))
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -93,105 +73,8 @@ def coerce_bool(value: object) -> int | None:
     return None
 
 
-def make_metric_key(name: str, labels: dict[str, str]) -> str:
-    """Build the canonical prometheus-style key used for store deduplication.
-
-    Labels are sorted alphabetically to ensure uniqueness regardless of
-    insertion order.
-    """
-    if not labels:
-        return name
-    label_str = ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
-    return f"{name}{{{label_str}}}"
-
-
 # ---------------------------------------------------------------------------
-# Store
-# ---------------------------------------------------------------------------
-
-
-def init_store(path: str) -> JsonBackedDict:
-    """Load or create the JBD store, then garbage-collect expired metrics."""
-    s = JsonBackedDict(path)
-
-    if "start_time" not in s:
-        s["start_time"] = datetime.now()
-        s["last_write"] = datetime.now()
-        s["message_count"] = 0
-        s["metrics"] = {}
-
-    # GC: remove metrics that have exceeded their TTL
-    now = time.time()
-    to_delete = [
-        key for key, meta in s["metrics"].items()
-        if meta["ttl"] != -1 and (now - meta["ts"]) > meta["ttl"]
-    ]
-    for key in to_delete:
-        del s["metrics"][key]
-        log.debug("GC: expired metric %s", key)
-
-    return s
-
-
-def write_metric(name: str, labels: dict[str, str], value: float, ttl: int) -> None:
-    """Write or update a single gauge metric in the module-level store."""
-    key = make_metric_key(name, labels)
-    store["metrics"][key] = {
-        "name": name,
-        "labels": labels,
-        "ts": time.time(),
-        "ttl": ttl,
-        "value": float(value),
-    }
-    store["last_write"] = datetime.now()
-    store["message_count"] = store["message_count"] + 1
-
-
-# ---------------------------------------------------------------------------
-# Prometheus collector
-# ---------------------------------------------------------------------------
-
-
-class MQTTCollector:
-    """Reads from the module-level store and yields Prometheus metrics."""
-
-    def collect(self):  # noqa: ANN201
-        now = time.time()
-        grouped: dict[str, list[tuple[dict[str, str], float]]] = {}
-        for _key, meta in store["metrics"].items():
-            ttl = meta["ttl"]
-            if ttl != -1 and (now - meta["ts"]) > ttl:
-                continue
-            grouped.setdefault(meta["name"], []).append((dict(meta["labels"]), meta["value"]))
-
-        for name, samples in grouped.items():
-            all_label_names: list[str] = []
-            for labels, _ in samples:
-                for k in labels:
-                    if k not in all_label_names:
-                        all_label_names.append(k)
-
-            g = GaugeMetricFamily(name, name, labels=all_label_names)
-            for labels, value in samples:
-                g.add_metric([labels.get(k, "") for k in all_label_names], value)
-            yield g
-
-
-# ---------------------------------------------------------------------------
-# Module-level store and Prometheus setup
-# ---------------------------------------------------------------------------
-
-for _collector in (PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR):
-    try:
-        REGISTRY.unregister(_collector)
-    except Exception:
-        pass
-
-store = init_store(STORE_PATH)
-REGISTRY.register(MQTTCollector())
-
-# ---------------------------------------------------------------------------
-# Gourd app and MQTT handlers
+# Gourd app
 # ---------------------------------------------------------------------------
 
 app = Gourd(
@@ -203,6 +86,10 @@ app = Gourd(
     status_enabled=False,
     log_mqtt=False,
 )
+
+# ---------------------------------------------------------------------------
+# MQTT handlers
+# ---------------------------------------------------------------------------
 
 
 @app.subscribe("ping/#")
@@ -366,60 +253,3 @@ def handle_weather(msg) -> None:
         return
 
     write_metric(f"weather_{resolution}_{index_str}_{metric}", {}, value, weather_ttl)
-
-
-# ---------------------------------------------------------------------------
-# HTTP server
-# ---------------------------------------------------------------------------
-
-
-class MetricsHandler(BaseHTTPRequestHandler):
-    """Serves ``/metrics`` in Prometheus text exposition format."""
-
-    def do_GET(self) -> None:
-        if self.path == "/metrics":
-            output = generate_latest(REGISTRY)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-            self.send_header("Content-Length", str(len(output)))
-            self.end_headers()
-            self.wfile.write(output)
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format: str, *args: object) -> None:  # type: ignore[override]
-        log.debug("HTTP %s", format % args)
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
-def main() -> None:
-    stop_event = threading.Event()
-
-    def _signal_handler(signum: int, frame: object) -> None:
-        log.info("Received signal %s, shutting down…", signum)
-        stop_event.set()
-
-    signal.signal(signal.SIGTERM, _signal_handler)
-    signal.signal(signal.SIGINT, _signal_handler)
-
-    app.loop_start()
-
-    http_server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), MetricsHandler)
-    threading.Thread(target=http_server.serve_forever, daemon=True, name="http-server").start()
-    log.info("HTTP /metrics available at http://%s:%d/metrics", HTTP_HOST, HTTP_PORT)
-
-    stop_event.wait()
-
-    app.loop_stop()
-    time.sleep(0.5)
-    http_server.shutdown()
-    log.info("Shutdown complete.")
-
-
-if __name__ == "__main__":
-    main()

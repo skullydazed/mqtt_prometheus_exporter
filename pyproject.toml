@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mqtt-prometheus-exporter = "mqtt_prometheus_exporter:main"
+mqtt-prometheus-exporter = "mqtt_prometheus_exporter.__main__:main"
 
 [dependency-groups]
 dev = [
