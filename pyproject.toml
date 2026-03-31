@@ -1,0 +1,35 @@
+[project]
+name = "mqtt-prometheus-exporter"
+version = "0.1.0"
+description = "Expose MQTT messages to a Prometheus scraper"
+requires-python = ">=3.12"
+dependencies = [
+    "gourd>=1.0.0",
+    "json-backed-dict>=1.0.1",
+    "prometheus-client>=0.24.0",
+]
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "ruff>=0.9.0",
+    "ty>=0.0.1a15",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty]
+python-version = "3.12"
