@@ -2,19 +2,13 @@
 
 import json
 import logging
-from typing import Protocol
 
 from json_backed_dict import JsonBackedDict
 
 from .config import TTL_DEFAULT
-from .store import celsius_to_fahrenheit, coerce_bool, store_metric
+from .store import celsius_to_fahrenheit, coerce_bool, init_store, store_metric
 
 log = logging.getLogger(__name__)
-
-
-class _MqttMsg(Protocol):
-    topic: str
-    payload: bytes
 
 # ---------------------------------------------------------------------------
 # RTL_433 configuration
@@ -79,10 +73,11 @@ ZIGBEE_FIELD_TTLS: dict[str, int] = {
 
 WEATHER_TTL = 3600
 
+store: JsonBackedDict = init_store()
 _minutely_precip_accumulator: float = 0.0
 
 
-def handle_ping(store: JsonBackedDict, msg: _MqttMsg) -> None:
+def handle_ping(msg) -> None:
     """Handle messages on ``ping/#``."""
     if msg.topic == 'ping/status':
         return
@@ -112,7 +107,7 @@ def handle_ping(store: JsonBackedDict, msg: _MqttMsg) -> None:
         )
 
 
-def handle_rtl433(store: JsonBackedDict, msg: _MqttMsg) -> None:
+def handle_rtl433(msg) -> None:
     """Handle messages on ``rtl_433/#``."""
     parts = msg.topic.split('/')
 
@@ -178,7 +173,7 @@ def handle_rtl433(store: JsonBackedDict, msg: _MqttMsg) -> None:
         )
 
 
-def handle_zigbee2mqtt(store: JsonBackedDict, msg: _MqttMsg) -> None:
+def handle_zigbee2mqtt(msg) -> None:
     """Handle messages on ``zigbee2mqtt/<device>``."""
     # msg.topic is e.g. "zigbee2mqtt/bedroom_sensor"
     parts = msg.topic.split('/', 1)
@@ -228,7 +223,7 @@ def handle_zigbee2mqtt(store: JsonBackedDict, msg: _MqttMsg) -> None:
             store_metric(store, f'zigbee2mqtt_{field}', {'device': device}, value, ttl)
 
 
-def handle_weather(store: JsonBackedDict, msg: _MqttMsg) -> None:
+def handle_weather(msg) -> None:
     """Handle messages on ``weather/<resolution>/<index>/<metric>``."""
     global _minutely_precip_accumulator
 
