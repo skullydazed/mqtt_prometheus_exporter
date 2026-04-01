@@ -10,6 +10,7 @@ import logging
 import signal
 
 from gourd import Gourd
+from prometheus_client import GC_COLLECTOR, PLATFORM_COLLECTOR, PROCESS_COLLECTOR, REGISTRY
 
 from .collector import make_registry
 from .config import (
@@ -25,6 +26,10 @@ from .handlers import handle_ping, handle_rtl433, handle_weather, handle_zigbee2
 from .server import start_server
 
 log = logging.getLogger(__name__)
+
+REGISTRY.unregister(PROCESS_COLLECTOR)
+REGISTRY.unregister(PLATFORM_COLLECTOR)
+REGISTRY.unregister(GC_COLLECTOR)
 
 registry = make_registry(store)
 http_server, _http_thread = start_server(HTTP_HOST, HTTP_PORT, registry)
