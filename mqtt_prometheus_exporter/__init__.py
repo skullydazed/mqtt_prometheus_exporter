@@ -8,22 +8,14 @@ thread.  The Prometheus HTTP server runs in a separate daemon thread.
 
 import logging
 import signal
+from threading import Thread
 
-from gourd import Gourd
 from prometheus_client import GC_COLLECTOR, PLATFORM_COLLECTOR, PROCESS_COLLECTOR, REGISTRY
 
 from .collector import make_registry
-from .config import (
-    HTTP_HOST,
-    HTTP_PORT,
-    MQTT_CLIENT_ID,
-    MQTT_HOST,
-    MQTT_PASS,
-    MQTT_PORT,
-    MQTT_USER,
-)
-from .handlers import handle_ping, handle_rtl433, handle_weather, handle_zigbee2mqtt, store
-from .server import start_server
+from .config import HTTP_HOST, HTTP_PORT
+from .handlers import app, store
+from .metrics_http import make_server
 
 log = logging.getLogger(__name__)
 
@@ -32,15 +24,9 @@ REGISTRY.unregister(PLATFORM_COLLECTOR)
 REGISTRY.unregister(GC_COLLECTOR)
 
 registry = make_registry(store)
-http_server, _http_thread = start_server(HTTP_HOST, HTTP_PORT, registry)
-
-app = Gourd(
-    MQTT_CLIENT_ID,
-    mqtt_host=MQTT_HOST,
-    mqtt_port=MQTT_PORT,
-    username=MQTT_USER,
-    password=MQTT_PASS,
-)
+_metrics_server = make_server(HTTP_HOST, HTTP_PORT, registry)
+Thread(target=_metrics_server.serve_forever, daemon=True, name='metrics-http').start()
+log.info('Metrics HTTP server listening on http://%s:%s/metrics', HTTP_HOST, HTTP_PORT)
 
 
 # SIGTERM is not handled by paho by default; stop the loop cleanly.
@@ -49,8 +35,3 @@ def _on_sigterm(signum: int, frame: object) -> None:
 
 
 signal.signal(signal.SIGTERM, _on_sigterm)
-
-app.subscribe('ping/#')(handle_ping)
-app.subscribe('rtl_433/#')(handle_rtl433)
-app.subscribe('zigbee2mqtt/#')(handle_zigbee2mqtt)
-app.subscribe('weather/#')(handle_weather)

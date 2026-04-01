@@ -1,4 +1,4 @@
-"""JBD-backed store: initialization, GC, and metric write helpers."""
+"""JBD-backed store: initialisation, GC, and metric write helpers."""
 
 import logging
 import time
@@ -60,31 +60,21 @@ def store_metric(
     store['message_count'] = store.get('message_count', 0) + 1
 
 
-def init_store(path: str = STORE_PATH) -> JsonBackedDict:
-    """Initialise (or load) the JBD store, then GC expired entries."""
-    initial: dict = {
-        'start_time': datetime.now(),
-        'last_write': datetime.now(),
-        'message_count': 0,
-        'metrics': {},
-    }
-    store = JsonBackedDict(path, initial=initial)
-
-    # Backfill any missing top-level keys (store existed before these were added)
-    for key, default in (
-        ('metrics', {}),
-        ('message_count', 0),
-        ('start_time', datetime.now()),
-        ('last_write', datetime.now()),
-    ):
-        if key not in store:
-            store[key] = default
-
-    # GC metrics that have exceeded their TTL
+def gc_store(store: JsonBackedDict) -> None:
+    """Remove all metrics whose TTL has elapsed."""
     now = time.time()
     expired = [k for k, v in store['metrics'].items() if v['ttl'] != -1 and (now - v['ts']) > v['ttl']]
     for k in expired:
         log.info('GC: removing expired metric %s', k)
         del store['metrics'][k]
 
+
+def init_store(path: str = STORE_PATH) -> JsonBackedDict:
+    """Load (or create) the JBD store, resetting run-level keys on every start."""
+    store = JsonBackedDict(path)
+    store['start_time'] = datetime.now()
+    store['last_write'] = datetime.now()
+    store['message_count'] = 0
+    if 'metrics' not in store:
+        store['metrics'] = {}
     return store

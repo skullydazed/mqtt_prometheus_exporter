@@ -8,6 +8,7 @@ import pytest
 from mqtt_prometheus_exporter.store import (
     celsius_to_fahrenheit,
     coerce_bool,
+    gc_store,
     init_store,
     make_metric_key,
     store_metric,
@@ -70,22 +71,14 @@ class TestStoreInit:
         assert 'message_count' in store
         assert store['message_count'] == 0
 
-    def test_gcs_expired_metrics(self, tmp_path):
+    def test_resets_run_level_keys(self, tmp_path):
         path = str(tmp_path / 'store.json')
         store = init_store(path)
-        # Manually insert an expired metric
-        store['metrics']['old_metric'] = {
-            'name': 'old_metric',
-            'labels': {},
-            'ts': time.time() - 1000,
-            'ttl': 300,
-            'value': 1.0,
-        }
-        # Re-init should GC it
+        store['message_count'] = 99
         store2 = init_store(path)
-        assert 'old_metric' not in store2['metrics']
+        assert store2['message_count'] == 0
 
-    def test_preserves_unexpired_metrics(self, tmp_path):
+    def test_preserves_metrics_across_restart(self, tmp_path):
         path = str(tmp_path / 'store.json')
         store = init_store(path)
         store['metrics']['fresh_metric'] = {
@@ -98,9 +91,34 @@ class TestStoreInit:
         store2 = init_store(path)
         assert 'fresh_metric' in store2['metrics']
 
+
+class TestGcStore:
+    def test_removes_expired_metrics(self, tmp_path):
+        store = init_store(str(tmp_path / 'store.json'))
+        store['metrics']['old_metric'] = {
+            'name': 'old_metric',
+            'labels': {},
+            'ts': time.time() - 1000,
+            'ttl': 300,
+            'value': 1.0,
+        }
+        gc_store(store)
+        assert 'old_metric' not in store['metrics']
+
+    def test_preserves_unexpired_metrics(self, tmp_path):
+        store = init_store(str(tmp_path / 'store.json'))
+        store['metrics']['fresh_metric'] = {
+            'name': 'fresh_metric',
+            'labels': {},
+            'ts': time.time(),
+            'ttl': 300,
+            'value': 42.0,
+        }
+        gc_store(store)
+        assert 'fresh_metric' in store['metrics']
+
     def test_never_expire_metrics_kept(self, tmp_path):
-        path = str(tmp_path / 'store.json')
-        store = init_store(path)
+        store = init_store(str(tmp_path / 'store.json'))
         store['metrics']['immortal'] = {
             'name': 'immortal',
             'labels': {},
@@ -108,8 +126,8 @@ class TestStoreInit:
             'ttl': -1,
             'value': 1.0,
         }
-        store2 = init_store(path)
-        assert 'immortal' in store2['metrics']
+        gc_store(store)
+        assert 'immortal' in store['metrics']
 
 
 class TestStoreMetric:

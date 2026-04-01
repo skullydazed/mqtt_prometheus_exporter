@@ -3,10 +3,11 @@
 import json
 import logging
 
+from gourd import Gourd
 from json_backed_dict import JsonBackedDict
 
-from .config import TTL_DEFAULT
-from .store import celsius_to_fahrenheit, coerce_bool, init_store, store_metric
+from .config import MQTT_CLIENT_ID, MQTT_HOST, MQTT_PASS, MQTT_PORT, MQTT_USER, TTL_DEFAULT
+from .store import celsius_to_fahrenheit, coerce_bool, gc_store, init_store, store_metric
 
 log = logging.getLogger(__name__)
 
@@ -74,9 +75,18 @@ ZIGBEE_FIELD_TTLS: dict[str, int] = {
 WEATHER_TTL = 3600
 
 store: JsonBackedDict = init_store()
+gc_store(store)
+app = Gourd(
+    MQTT_CLIENT_ID,
+    mqtt_host=MQTT_HOST,
+    mqtt_port=MQTT_PORT,
+    username=MQTT_USER,
+    password=MQTT_PASS,
+)
 _minutely_precip_accumulator: float = 0.0
 
 
+@app.subscribe('ping/#')
 def handle_ping(msg) -> None:
     """Handle messages on ``ping/#``."""
     if msg.topic == 'ping/status':
@@ -107,6 +117,7 @@ def handle_ping(msg) -> None:
         )
 
 
+@app.subscribe('rtl_433/#')
 def handle_rtl433(msg) -> None:
     """Handle messages on ``rtl_433/#``."""
     parts = msg.topic.split('/')
@@ -173,6 +184,7 @@ def handle_rtl433(msg) -> None:
         )
 
 
+@app.subscribe('zigbee2mqtt/#')
 def handle_zigbee2mqtt(msg) -> None:
     """Handle messages on ``zigbee2mqtt/<device>``."""
     # msg.topic is e.g. "zigbee2mqtt/bedroom_sensor"
@@ -223,6 +235,7 @@ def handle_zigbee2mqtt(msg) -> None:
             store_metric(store, f'zigbee2mqtt_{field}', {'device': device}, value, ttl)
 
 
+@app.subscribe('weather/#')
 def handle_weather(msg) -> None:
     """Handle messages on ``weather/<resolution>/<index>/<metric>``."""
     global _minutely_precip_accumulator
