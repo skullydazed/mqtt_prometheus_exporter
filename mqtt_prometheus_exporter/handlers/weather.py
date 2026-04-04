@@ -15,8 +15,8 @@ _DAILY_METRIC_MAP = {
     "wind_speed": "weather_wind_speed_ms",
     "wind_gust": "weather_wind_gust_ms",
     "wind_deg": "weather_wind_deg",
-    "dew_point_C": "weather_dew_point_celsius",
-    "dew_point_F": "weather_dew_point_fahrenheit",
+    "dew_point_C": "weather_dew_point_C",
+    "dew_point_F": "weather_dew_point_F",
     "uvi": "weather_uvi",
     "pop": "weather_pop",
     "rain": "weather_rain_mm",
@@ -30,10 +30,10 @@ _DAILY_METRIC_MAP = {
 }
 
 _TEMP_METRICS = {
-    ("temp", "_C"): "weather_temp_celsius",
-    ("temp", "_F"): "weather_temp_fahrenheit",
-    ("feels_like", "_C"): "weather_feels_like_celsius",
-    ("feels_like", "_F"): "weather_feels_like_fahrenheit",
+    ("temp", "_C"): "weather_temp_C",
+    ("temp", "_F"): "weather_temp_F",
+    ("feels_like", "_C"): "weather_feels_like_C",
+    ("feels_like", "_F"): "weather_feels_like_F",
 }
 
 

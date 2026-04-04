@@ -292,7 +292,7 @@ def test_weather_daily_humidity_day3():
 
 def test_weather_daily_dew_point_celsius():
     handle_weather(msg("weather/daily/1/dew_point_C", "12.5"))
-    assert stored("weather_dew_point_celsius", day="1") == pytest.approx(12.5)
+    assert stored("weather_dew_point_C", day="1") == pytest.approx(12.5)
 
 
 def test_weather_daily_sunrise():
@@ -312,17 +312,17 @@ def test_weather_daily_unknown_field_not_stored():
 
 def test_weather_daily_5part_temp_celsius():
     handle_weather(msg("weather/daily/0/temp/morn_C", "14.0"))
-    assert stored("weather_temp_celsius", day="0", period="morn") == pytest.approx(14.0)
+    assert stored("weather_temp_C", day="0", period="morn") == pytest.approx(14.0)
 
 
 def test_weather_daily_5part_temp_fahrenheit():
     handle_weather(msg("weather/daily/0/temp/max_F", "75.2"))
-    assert stored("weather_temp_fahrenheit", day="0", period="max") == pytest.approx(75.2)
+    assert stored("weather_temp_F", day="0", period="max") == pytest.approx(75.2)
 
 
 def test_weather_daily_5part_feels_like_celsius():
     handle_weather(msg("weather/daily/2/feels_like/night_C", "10.0"))
-    assert stored("weather_feels_like_celsius", day="2", period="night") == pytest.approx(10.0)
+    assert stored("weather_feels_like_C", day="2", period="night") == pytest.approx(10.0)
 
 
 def test_weather_daily_5part_bare_period_not_stored():
