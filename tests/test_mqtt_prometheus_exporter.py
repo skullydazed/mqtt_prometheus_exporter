@@ -251,6 +251,11 @@ def test_zigbee_bridge_topic_not_stored():
     assert store["metrics"] == {}
 
 
+def test_zigbee_slash_device_name():
+    handle_zigbee(msg("zigbee2mqtt/bedroom/humidity_temp", json.dumps({"temperature": 22.0})))
+    assert stored("zigbee2mqtt_temperature_C", device="bedroom/humidity_temp") == pytest.approx(22.0)
+
+
 def test_zigbee_unknown_fields_not_stored():
     handle_zigbee(msg("zigbee2mqtt/sensor", json.dumps({"unknown_field": 42})))
     assert store["metrics"] == {}

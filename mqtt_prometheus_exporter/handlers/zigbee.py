@@ -23,11 +23,9 @@ ZIGBEE_FIELDS: dict[str, tuple[str, int | None]] = {
 
 @app.subscribe("zigbee2mqtt/#")
 def handle_zigbee(message):
-    parts = message.topic.split("/", 2)
-    if len(parts) != 2:
+    device = message.topic.split("/", 1)[1]
+    if device.startswith("bridge"):
         return  # skip bridge/subtopics
-
-    device = parts[1]
 
     try:
         data = json.loads(message.payload)
