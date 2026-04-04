@@ -33,10 +33,10 @@ Backed by a `JBD` instance. Initialized on startup if the file does not exist. G
     'message_count': int,    # debugging field
     'metrics': {
         # key is still the full prometheus string, used only for uniqueness
-        # e.g. 'temperature_celsius{room="kitchen",source="zwave"}'
+        # e.g. 'temperature_C{room="kitchen",source="zwave"}'
         # Labels should normalized to alphabetical order for dedupe purposes
         'metric_name{label="value",...}': {
-            'name':   str,    # base metric name, e.g. 'temperature_celsius'
+            'name':   str,    # base metric name, e.g. 'temperature_C'
             'labels': dict,   # e.g. {'room': 'kitchen', 'source': 'zwave'}
             'ts':     float,  # time.time() at last update
             'ttl':    int,    # seconds; -1 = never expire
