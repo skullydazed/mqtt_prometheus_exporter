@@ -14,7 +14,7 @@ import pytest
 
 # Point STORE_PATH at a temp file so the real JBD is used without touching
 # any production state.
-os.environ["STORE_PATH"] = tempfile.mktemp(suffix=".json")
+os.environ["STORE_PATH"] = tempfile.mktemp(suffix=".json")  # ty: ignore[deprecated]
 
 from mqtt_prometheus_exporter.collector import MQTTCollector
 from mqtt_prometheus_exporter.handlers.ping import handle_ping

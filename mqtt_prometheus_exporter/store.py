@@ -47,4 +47,4 @@ def store_metric(name: str, labels: dict, value: float, ttl: int | None = None) 
     }
     store["last_write"] = datetime.now()
     store["message_count"] += 1
-    logging.debug('Wrote metric to store: %s: %s', key, store["metrics"][key])
+    logging.debug("Wrote metric to store: %s: %s", key, store["metrics"][key])
