@@ -1,0 +1,21 @@
+[project]
+name = "mqtt-prometheus-exporter"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "gourd",
+    "prometheus_client",
+    "json-backed-dict",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "ty"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

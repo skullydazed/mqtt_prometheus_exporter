@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:gourd.clueboard.co)",
+      "WebFetch(domain:pypi.org)"
+    ]
+  }
+}
