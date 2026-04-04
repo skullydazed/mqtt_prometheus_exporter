@@ -1,0 +1,18 @@
+[Unit]
+Description=MQTT to Prometheus metrics exporter
+After=network.target mosquitto.service
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+User=YOUR_USER
+WorkingDirectory=/path/to/mqtt_prometheus_exporter
+Environment=MQTT_HOST=localhost
+Environment=STORE_PATH=/path/to/mqtt_prometheus_exporter/store.json
+# Optional auth:
+# Environment=MQTT_USER=youruser
+# Environment=MQTT_PASS=yourpass
+ExecStart=/path/to/mqtt_prometheus_exporter/.venv/bin/gourd mqtt_prometheus_exporter:app
+
+[Install]
+WantedBy=multi-user.target

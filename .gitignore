@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 *.pyc
 store.json
+mqtt_prometheus_exporter.service
