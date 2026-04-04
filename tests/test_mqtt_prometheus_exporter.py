@@ -5,55 +5,24 @@ the store. Pure helpers are tested directly.
 """
 
 import json
-import logging
 import os
-import sys
 import tempfile
 import time
 import types
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Stub out gourd so no MQTT connections happen.
 # Point STORE_PATH at a temp file so the real JBD is used without touching
 # any production state.
-# ---------------------------------------------------------------------------
-
 os.environ["STORE_PATH"] = tempfile.mktemp(suffix=".json")
 
-
-def _make_stub_modules():
-    gourd_mod = types.ModuleType("gourd")
-
-    class FakeGourd:
-        def __init__(self, **kwargs):
-            self.log = logging.getLogger("test")
-
-        def subscribe(self, topic):
-            def decorator(fn):
-                return fn
-            return decorator
-
-        def loop_stop(self):
-            pass
-
-    gourd_mod.Gourd = FakeGourd
-    sys.modules["gourd"] = gourd_mod
-
-
-_make_stub_modules()
-
-# Import directly from submodules — avoids __init__.py which imports startup
-# and starts background threads.
-from mqtt_prometheus_exporter.collector import MQTTCollector  # noqa: E402
-from mqtt_prometheus_exporter.handlers.ping import handle_ping  # noqa: E402
-from mqtt_prometheus_exporter.handlers.rtl433 import handle_rtl433  # noqa: E402
-from mqtt_prometheus_exporter.handlers.weather import handle_weather  # noqa: E402
-from mqtt_prometheus_exporter.handlers.zigbee import handle_zigbee  # noqa: E402
-from mqtt_prometheus_exporter.helpers import celsius_to_fahrenheit, make_metric_key, parse_bool  # noqa: E402
-from mqtt_prometheus_exporter.store import gc_store, store  # noqa: E402
-
+from mqtt_prometheus_exporter.collector import MQTTCollector
+from mqtt_prometheus_exporter.handlers.ping import handle_ping
+from mqtt_prometheus_exporter.handlers.rtl433 import handle_rtl433
+from mqtt_prometheus_exporter.handlers.weather import handle_weather
+from mqtt_prometheus_exporter.handlers.zigbee import handle_zigbee
+from mqtt_prometheus_exporter.helpers import celsius_to_fahrenheit, make_metric_key, parse_bool
+from mqtt_prometheus_exporter.store import gc_store, store
 
 # ---------------------------------------------------------------------------
 # Test utilities
@@ -160,9 +129,12 @@ def test_make_metric_key_no_labels():
 
 
 def test_ping_stores_all_stats():
-    handle_ping(msg("ping/8.8.8.8", json.dumps(
-        {"last_1_min": {"min": 1.1, "avg": 2.2, "max": 3.3, "percent_dropped": 0.0}}
-    )))
+    handle_ping(
+        msg(
+            "ping/8.8.8.8",
+            json.dumps({"last_1_min": {"min": 1.1, "avg": 2.2, "max": 3.3, "percent_dropped": 0.0}}),
+        )
+    )
     assert stored("ping_min", destination="8.8.8.8") == pytest.approx(1.1)
     assert stored("ping_avg", destination="8.8.8.8") == pytest.approx(2.2)
     assert stored("ping_max", destination="8.8.8.8") == pytest.approx(3.3)
@@ -203,7 +175,9 @@ def test_ping_partial_stats():
 def test_rtl433_temperature_stores_both_scales():
     handle_rtl433(msg("rtl_433/myhost/devices/Tower/A/42/temperature_C", "21.5"))
     assert stored("rtl433_temperature_C", model="Tower", channel="A", sensor="shed") == pytest.approx(21.5)
-    assert stored("rtl433_temperature_F", model="Tower", channel="A", sensor="shed") == pytest.approx(celsius_to_fahrenheit(21.5))
+    assert stored("rtl433_temperature_F", model="Tower", channel="A", sensor="shed") == pytest.approx(
+        celsius_to_fahrenheit(21.5)
+    )
 
 
 def test_rtl433_6part_uses_main_channel():
@@ -375,8 +349,8 @@ def test_gc_empty_store():
 def test_gc_all_expired():
     now = time.time()
     store["metrics"] = {
-        'a{}': {"name": "a", "labels": {}, "ts": now - 100, "ttl": 10, "value": 1.0},
-        'b{}': {"name": "b", "labels": {}, "ts": now - 200, "ttl": 10, "value": 2.0},
+        "a{}": {"name": "a", "labels": {}, "ts": now - 100, "ttl": 10, "value": 1.0},
+        "b{}": {"name": "b", "labels": {}, "ts": now - 200, "ttl": 10, "value": 2.0},
     }
     removed = gc_store(store)
     assert removed == 2
@@ -394,7 +368,13 @@ def test_collector_filters_expired_groups_by_name():
         'm{label="a"}': {"name": "m", "labels": {"label": "a"}, "ts": now, "ttl": 300, "value": 1.0},
         'm{label="b"}': {"name": "m", "labels": {"label": "b"}, "ts": now, "ttl": 300, "value": 2.0},
         'expired{label="x"}': {"name": "expired", "labels": {"label": "x"}, "ts": now - 400, "ttl": 300, "value": 9.0},
-        'permanent{label="y"}': {"name": "permanent", "labels": {"label": "y"}, "ts": now - 100_000, "ttl": -1, "value": 5.0},
+        'permanent{label="y"}': {
+            "name": "permanent",
+            "labels": {"label": "y"},
+            "ts": now - 100_000,
+            "ttl": -1,
+            "value": 5.0,
+        },
     }
     families = list(MQTTCollector().collect())
     names = {f.name for f in families}

@@ -1,9 +1,11 @@
+import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from .config import HTTP_HOST, HTTP_PORT
+from .app import app
 from .collector import registry
+from .config import HTTP_HOST, HTTP_PORT
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
@@ -22,4 +24,8 @@ class MetricsHandler(BaseHTTPRequestHandler):
         pass  # suppress HTTP access logs
 
 
-httpd = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), MetricsHandler)
+@app.thread()
+def serve_metrics():
+    httpd = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), MetricsHandler)
+    logging.info("HTTP metrics server started on %s:%d", HTTP_HOST, HTTP_PORT)
+    httpd.serve_forever()

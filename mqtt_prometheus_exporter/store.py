@@ -16,6 +16,7 @@ if "metrics" not in store:
     store["metrics"] = {}
     logging.info("Initialized new store at %s", STORE_PATH)
 
+
 def gc_store(jbd) -> int:
     """Remove expired metrics from jbd['metrics']. Returns count removed."""
     _now = time.time()
