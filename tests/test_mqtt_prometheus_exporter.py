@@ -295,6 +295,21 @@ def test_weather_daily_index_2_not_stored():
     assert store["metrics"] == {}
 
 
+def test_weather_daily_5part_temp_max():
+    handle_weather(msg("weather/daily/0/temp/max", "18.5"))
+    assert stored("weather_today_temp_max") == pytest.approx(18.5)
+
+
+def test_weather_daily_5part_feels_like():
+    handle_weather(msg("weather/daily/0/feels_like/day", "16.0"))
+    assert stored("weather_today_feels_like_day") == pytest.approx(16.0)
+
+
+def test_weather_6part_topic_not_stored():
+    handle_weather(msg("weather/daily/0/temp/max/extra", "1.0"))
+    assert store["metrics"] == {}
+
+
 def test_weather_dt_not_stored():
     handle_weather(msg("weather/dt/0/timestamp", "1234567890"))
     assert store["metrics"] == {}

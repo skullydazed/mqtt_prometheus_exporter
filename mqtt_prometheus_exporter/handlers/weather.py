@@ -13,10 +13,13 @@ _minutely_precip_lock = threading.Lock()
 @app.subscribe("weather/#")
 def handle_weather(message):
     parts = message.topic.split("/")
-    if len(parts) != 4:
+    if len(parts) == 4:
+        _, resolution, index, metric = parts
+    elif len(parts) == 5:
+        _, resolution, index, part4, part5 = parts
+        metric = f"{part4}_{part5}"
+    else:
         return
-
-    _, resolution, index, metric = parts
 
     if resolution == "dt":
         return
