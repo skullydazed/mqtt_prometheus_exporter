@@ -280,29 +280,59 @@ def test_weather_minutely_resets_on_index_0():
     assert stored("weather_precipitation_next_hour") == pytest.approx(1.0)
 
 
-def test_weather_daily_today():
-    handle_weather(msg("weather/daily/0/temp_max", "25.0"))
-    assert stored("weather_today_temp_max") == pytest.approx(25.0)
+def test_weather_daily_humidity():
+    handle_weather(msg("weather/daily/0/humidity", "65"))
+    assert stored("weather_humidity_pct", day="0") == pytest.approx(65.0)
 
 
-def test_weather_daily_tomorrow():
-    handle_weather(msg("weather/daily/1/temp_min", "10.0"))
-    assert stored("weather_tomorrow_temp_min") == pytest.approx(10.0)
+def test_weather_daily_humidity_day3():
+    handle_weather(msg("weather/daily/3/wind_speed", "4.2"))
+    assert stored("weather_wind_speed_ms", day="3") == pytest.approx(4.2)
 
 
-def test_weather_daily_index_2_not_stored():
-    handle_weather(msg("weather/daily/2/temp_max", "30.0"))
+def test_weather_daily_dew_point_celsius():
+    handle_weather(msg("weather/daily/1/dew_point_C", "12.5"))
+    assert stored("weather_dew_point_celsius", day="1") == pytest.approx(12.5)
+
+
+def test_weather_daily_sunrise():
+    handle_weather(msg("weather/daily/0/sunrise", "1712030400"))
+    assert stored("weather_sunrise_ts", day="0") == pytest.approx(1712030400.0)
+
+
+def test_weather_daily_index_7():
+    handle_weather(msg("weather/daily/7/humidity", "50"))
+    assert stored("weather_humidity_pct", day="7") == pytest.approx(50.0)
+
+
+def test_weather_daily_unknown_field_not_stored():
+    handle_weather(msg("weather/daily/0/dt", "1712030400"))
     assert store["metrics"] == {}
 
 
-def test_weather_daily_5part_temp_max():
-    handle_weather(msg("weather/daily/0/temp/max", "18.5"))
-    assert stored("weather_today_temp_max") == pytest.approx(18.5)
+def test_weather_daily_5part_temp_celsius():
+    handle_weather(msg("weather/daily/0/temp/morn_C", "14.0"))
+    assert stored("weather_temp_celsius", day="0", period="morn") == pytest.approx(14.0)
 
 
-def test_weather_daily_5part_feels_like():
-    handle_weather(msg("weather/daily/0/feels_like/day", "16.0"))
-    assert stored("weather_today_feels_like_day") == pytest.approx(16.0)
+def test_weather_daily_5part_temp_fahrenheit():
+    handle_weather(msg("weather/daily/0/temp/max_F", "75.2"))
+    assert stored("weather_temp_fahrenheit", day="0", period="max") == pytest.approx(75.2)
+
+
+def test_weather_daily_5part_feels_like_celsius():
+    handle_weather(msg("weather/daily/2/feels_like/night_C", "10.0"))
+    assert stored("weather_feels_like_celsius", day="2", period="night") == pytest.approx(10.0)
+
+
+def test_weather_daily_5part_bare_period_not_stored():
+    handle_weather(msg("weather/daily/0/temp/morn", "14.0"))
+    assert store["metrics"] == {}
+
+
+def test_weather_daily_5part_unrecognized_part4_not_stored():
+    handle_weather(msg("weather/daily/0/summary/morn_C", "14.0"))
+    assert store["metrics"] == {}
 
 
 def test_weather_6part_topic_not_stored():
