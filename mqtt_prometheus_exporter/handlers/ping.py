@@ -11,7 +11,6 @@ log = logging.getLogger(__name__)
 def handle_ping(message):
     parts = message.topic.split("/", 1)
     if len(parts) < 2:
-        log.warning("ping: unrecognized topic structure: %s", message.topic)
         return
     remainder = parts[1]
     if remainder == "status":

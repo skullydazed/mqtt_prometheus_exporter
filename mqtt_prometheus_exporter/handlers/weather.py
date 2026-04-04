@@ -14,7 +14,6 @@ _minutely_precip_lock = threading.Lock()
 def handle_weather(message):
     parts = message.topic.split("/")
     if len(parts) != 4:
-        log.warning("weather: unrecognized topic structure: %s", message.topic)
         return
 
     _, resolution, index, metric = parts
@@ -54,5 +53,3 @@ def handle_weather(message):
             return
         store_metric(f"weather_{prefix}_{metric}", {}, value, ttl)
         return
-
-    log.warning("weather: unrecognized resolution %r in topic: %s", resolution, message.topic)

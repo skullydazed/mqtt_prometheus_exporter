@@ -38,7 +38,6 @@ RTL_FIELD_TYPES: dict[str, str] = {
 def handle_rtl433(message):
     parts = message.topic.split("/")
     if len(parts) < 6:
-        log.warning("rtl_433: unrecognized topic structure: %s", message.topic)
         return
     if parts[2] != "devices":
         log.warning("rtl_433: unexpected topic segment (expected 'devices'): %s", message.topic)
