@@ -9,32 +9,33 @@ log = logging.getLogger(__name__)
 _minutely_precip: dict[int, float] = {}
 _minutely_precip_lock = threading.Lock()
 
-_DAILY_METRIC_MAP = {
-    "humidity": "weather_humidity_pct",
-    "pressure": "weather_pressure_hpa",
-    "wind_speed": "weather_wind_speed_ms",
-    "wind_gust": "weather_wind_gust_ms",
-    "wind_deg": "weather_wind_deg",
-    "dew_point_C": "weather_dew_point_C",
-    "dew_point_F": "weather_dew_point_F",
-    "uvi": "weather_uvi",
-    "pop": "weather_pop",
-    "rain": "weather_rain_mm",
-    "snow": "weather_snow_mm",
-    "clouds": "weather_clouds_pct",
-    "sunrise": "weather_sunrise_ts",
-    "sunset": "weather_sunset_ts",
-    "moonrise": "weather_moonrise_ts",
-    "moonset": "weather_moonset_ts",
-    "moon_phase": "weather_moon_phase",
+_WEATHER_SUFFIXES = {
+    "humidity": "_humidity_pct",
+    "pressure": "_pressure_hpa",
+    "wind_speed": "_wind_speed_ms",
+    "wind_gust": "_wind_gust_ms",
+    "wind_deg": "_wind_deg",
+    "dew_point_C": "_dew_point_C",
+    "dew_point_F": "_dew_point_F",
+    "temp_C": "_temp_C",
+    "temp_F": "_temp_F",
+    "feels_like_C": "_feels_like_C",
+    "feels_like_F": "_feels_like_F",
+    "uvi": "_uvi",
+    "clouds": "_clouds_pct",
+    "visibility": "_visibility_m",
+    "pop": "_pop",
+    "rain": "_rain_mm",
+    "snow": "_snow_mm",
+    "sunrise": "_sunrise_ts",
+    "sunset": "_sunset_ts",
+    "moonrise": "_moonrise_ts",
+    "moonset": "_moonset_ts",
+    "moon_phase": "_moon_phase",
 }
 
-_TEMP_METRICS = {
-    ("temp", "_C"): "weather_temp_C",
-    ("temp", "_F"): "weather_temp_F",
-    ("feels_like", "_C"): "weather_feels_like_C",
-    ("feels_like", "_F"): "weather_feels_like_F",
-}
+# Field names that nest a sub-period (e.g. weather/daily/0/temp/morn_C)
+_TEMP_TYPES = {"temp", "feels_like"}
 
 
 @app.subscribe("weather/#")
@@ -72,27 +73,33 @@ def handle_weather(message):
         store_metric("weather_precipitation_next_hour", {}, total, ttl)
         return
 
-    if resolution == "daily":
+    # Infer structure from topic shape: numeric parts[2] → indexed resolution
+    try:
+        index = parts[2]
+        int(index)
+        indexed = True
+    except ValueError:
+        indexed = False
+
+    if indexed:
         if len(parts) == 4:
-            # 4-part topic: weather/daily/{n}/{metric}
-            index, metric = parts[2], parts[3]
-            prom_name = _DAILY_METRIC_MAP.get(metric)
-            if prom_name is None:
+            suffix = _WEATHER_SUFFIXES.get(parts[3])
+            if suffix is None:
                 return
-            store_metric(prom_name, {"day": index}, value, ttl)
+            store_metric(f"weather_{resolution}{suffix}", {resolution: index}, value, ttl)
         elif len(parts) == 5:
-            # 5-part topic: weather/daily/{n}/{part4}/{part5}
-            index, part4, part5 = parts[2], parts[3], parts[4]
-            if part5.endswith("_C"):
-                unit = "_C"
-                period = part5[:-2]
-            elif part5.endswith("_F"):
-                unit = "_F"
-                period = part5[:-2]
-            else:
-                return  # bare period path, no unit suffix
-            prom_name = _TEMP_METRICS.get((part4, unit))
-            if prom_name is None:
+            temp_type, part5 = parts[3], parts[4]
+            if temp_type not in _TEMP_TYPES:
                 return
-            store_metric(prom_name, {"day": index, "period": period}, value, ttl)
-        return
+            if not (part5.endswith("_C") or part5.endswith("_F")):
+                return
+            unit, period = part5[-2:], part5[:-2]
+            store_metric(f"weather_{resolution}_{temp_type}{unit}", {resolution: index, "period": period}, value, ttl)
+    else:
+        # scalar resolution (e.g. current): weather/{resolution}/{field}
+        if len(parts) != 3:
+            return
+        suffix = _WEATHER_SUFFIXES.get(parts[2])
+        if suffix is None:
+            return
+        store_metric(f"weather_{resolution}{suffix}", {}, value, ttl)

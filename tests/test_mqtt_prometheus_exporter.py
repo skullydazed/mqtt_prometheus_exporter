@@ -287,27 +287,27 @@ def test_weather_minutely_resets_on_index_0():
 
 def test_weather_daily_humidity():
     handle_weather(msg("weather/daily/0/humidity", "65"))
-    assert stored("weather_humidity_pct", day="0") == pytest.approx(65.0)
+    assert stored("weather_daily_humidity_pct", daily="0") == pytest.approx(65.0)
 
 
 def test_weather_daily_humidity_day3():
     handle_weather(msg("weather/daily/3/wind_speed", "4.2"))
-    assert stored("weather_wind_speed_ms", day="3") == pytest.approx(4.2)
+    assert stored("weather_daily_wind_speed_ms", daily="3") == pytest.approx(4.2)
 
 
 def test_weather_daily_dew_point_celsius():
     handle_weather(msg("weather/daily/1/dew_point_C", "12.5"))
-    assert stored("weather_dew_point_C", day="1") == pytest.approx(12.5)
+    assert stored("weather_daily_dew_point_C", daily="1") == pytest.approx(12.5)
 
 
 def test_weather_daily_sunrise():
     handle_weather(msg("weather/daily/0/sunrise", "1712030400"))
-    assert stored("weather_sunrise_ts", day="0") == pytest.approx(1712030400.0)
+    assert stored("weather_daily_sunrise_ts", daily="0") == pytest.approx(1712030400.0)
 
 
 def test_weather_daily_index_7():
     handle_weather(msg("weather/daily/7/humidity", "50"))
-    assert stored("weather_humidity_pct", day="7") == pytest.approx(50.0)
+    assert stored("weather_daily_humidity_pct", daily="7") == pytest.approx(50.0)
 
 
 def test_weather_daily_unknown_field_not_stored():
@@ -317,17 +317,17 @@ def test_weather_daily_unknown_field_not_stored():
 
 def test_weather_daily_5part_temp_celsius():
     handle_weather(msg("weather/daily/0/temp/morn_C", "14.0"))
-    assert stored("weather_temp_C", day="0", period="morn") == pytest.approx(14.0)
+    assert stored("weather_daily_temp_C", daily="0", period="morn") == pytest.approx(14.0)
 
 
 def test_weather_daily_5part_temp_fahrenheit():
     handle_weather(msg("weather/daily/0/temp/max_F", "75.2"))
-    assert stored("weather_temp_F", day="0", period="max") == pytest.approx(75.2)
+    assert stored("weather_daily_temp_F", daily="0", period="max") == pytest.approx(75.2)
 
 
 def test_weather_daily_5part_feels_like_celsius():
     handle_weather(msg("weather/daily/2/feels_like/night_C", "10.0"))
-    assert stored("weather_feels_like_C", day="2", period="night") == pytest.approx(10.0)
+    assert stored("weather_daily_feels_like_C", daily="2", period="night") == pytest.approx(10.0)
 
 
 def test_weather_daily_5part_bare_period_not_stored():
@@ -362,6 +362,51 @@ def test_weather_wrong_topic_not_stored():
 
 def test_weather_minutely_non_integer_index_not_stored():
     handle_weather(msg("weather/minutely/abc/precipitation", "0.5"))
+    assert store["metrics"] == {}
+
+
+def test_weather_current_humidity():
+    handle_weather(msg("weather/current/humidity", "86"))
+    assert stored("weather_current_humidity_pct") == pytest.approx(86.0)
+
+
+def test_weather_current_temp_celsius():
+    handle_weather(msg("weather/current/temp_C", "14.16"))
+    assert stored("weather_current_temp_C") == pytest.approx(14.16)
+
+
+def test_weather_current_sunrise():
+    handle_weather(msg("weather/current/sunrise", "1712030400"))
+    assert stored("weather_current_sunrise_ts") == pytest.approx(1712030400.0)
+
+
+def test_weather_current_unknown_field_not_stored():
+    handle_weather(msg("weather/current/dt", "1712030400"))
+    assert store["metrics"] == {}
+
+
+def test_weather_current_4part_not_stored():
+    handle_weather(msg("weather/current/extra/field", "1.0"))
+    assert store["metrics"] == {}
+
+
+def test_weather_hourly_humidity():
+    handle_weather(msg("weather/hourly/0/humidity", "80"))
+    assert stored("weather_hourly_humidity_pct", hourly="0") == pytest.approx(80.0)
+
+
+def test_weather_hourly_temp_celsius():
+    handle_weather(msg("weather/hourly/6/temp_C", "18.5"))
+    assert stored("weather_hourly_temp_C", hourly="6") == pytest.approx(18.5)
+
+
+def test_weather_hourly_unknown_field_not_stored():
+    handle_weather(msg("weather/hourly/0/dt", "1712030400"))
+    assert store["metrics"] == {}
+
+
+def test_weather_hourly_3part_not_stored():
+    handle_weather(msg("weather/hourly/0", "1.0"))
     assert store["metrics"] == {}
 
 
