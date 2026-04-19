@@ -8,11 +8,10 @@ from .store import store
 
 @app.thread()
 def flush_store():
-    interval = STORE_WRITE_INTERVAL
-    logging.info("Periodic store writer started (interval=%.1fs)", interval)
+    logging.info("Periodic store writer started (interval=%ss)", STORE_WRITE_INTERVAL)
     while True:
-        time.sleep(interval)
         try:
             store.save()
         except Exception:
             logging.exception("Periodic store save failed")
+        time.sleep(STORE_WRITE_INTERVAL)
