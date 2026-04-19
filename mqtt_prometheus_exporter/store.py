@@ -8,6 +8,10 @@ from .config import STORE_PATH, TTL_DEFAULT
 from .helpers import make_metric_key
 
 store = JBD(STORE_PATH)
+store.exclude("start_time")
+store.exclude("last_write")
+store.exclude("message_count")
+store.write_enabled = False
 store["start_time"] = datetime.now()
 store["last_write"] = datetime.now()
 store["message_count"] = 0

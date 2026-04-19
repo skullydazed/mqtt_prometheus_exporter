@@ -408,6 +408,41 @@ def test_gc_all_expired():
 
 
 # ---------------------------------------------------------------------------
+# store write controls
+# ---------------------------------------------------------------------------
+
+
+def test_store_auto_writes_disabled():
+    assert store.write_enabled is False
+
+
+def test_store_excludes_debug_keys_from_write_triggers():
+    store_path = str(store._path)
+    original_enabled = store.write_enabled
+    original_message_count = store["message_count"]
+    try:
+        store.write_enabled = True
+        store.save()
+        with open(store_path) as f:
+            before = f.read()
+
+        store["message_count"] = original_message_count + 1
+        with open(store_path) as f:
+            after_excluded = f.read()
+        assert after_excluded == before
+
+        store["metrics"]["write_probe"] = {"name": "write_probe", "labels": {}, "ts": time.time(), "ttl": 60, "value": 1.0}
+        with open(store_path) as f:
+            after_metric = f.read()
+        assert after_metric != before
+    finally:
+        store["metrics"].pop("write_probe", None)
+        store["message_count"] = original_message_count
+        store.write_enabled = original_enabled
+        store.save()
+
+
+# ---------------------------------------------------------------------------
 # MQTTCollector.collect()
 # ---------------------------------------------------------------------------
 
