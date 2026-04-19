@@ -7,7 +7,7 @@ MQTT_USER = os.environ.get("MQTT_USER", "")
 MQTT_PASS = os.environ.get("MQTT_PASS", "")
 STORE_PATH = os.environ.get("STORE_PATH", "store.json")
 TTL_DEFAULT = int(os.environ.get("TTL_DEFAULT", "1800"))
-STORE_WRITE_INTERVAL = float(os.environ.get("STORE_WRITE_INTERVAL", "30"))
+STORE_WRITE_INTERVAL = float(os.environ.get("STORE_WRITE_INTERVAL", "300"))
 if STORE_WRITE_INTERVAL < 1.0:
     msg = "STORE_WRITE_INTERVAL must be >= 1.0"
     raise ValueError(msg)
