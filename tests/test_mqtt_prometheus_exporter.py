@@ -9,6 +9,7 @@ import os
 import tempfile
 import time
 import types
+from datetime import timedelta
 
 import pytest
 
@@ -419,17 +420,23 @@ def test_store_auto_writes_disabled():
 def test_store_excludes_debug_keys_from_write_triggers():
     store_path = str(store._path)
     original_enabled = store.write_enabled
-    original_message_count = store["message_count"]
+    original_debug_values = {
+        "message_count": store["message_count"],
+        "start_time": store["start_time"],
+        "last_write": store["last_write"],
+    }
     try:
         store.write_enabled = True
         store.save()
         with open(store_path) as f:
             before = f.read()
 
-        store["message_count"] = original_message_count + 1
+        store["message_count"] = original_debug_values["message_count"] + 1
+        store["start_time"] = original_debug_values["start_time"] + timedelta(seconds=1)
+        store["last_write"] = original_debug_values["last_write"] + timedelta(seconds=1)
         with open(store_path) as f:
-            after_excluded = f.read()
-        assert after_excluded == before
+            after_debug_updates = f.read()
+        assert after_debug_updates == before
 
         store["metrics"]["write_probe"] = {
             "name": "write_probe",
@@ -443,7 +450,8 @@ def test_store_excludes_debug_keys_from_write_triggers():
         assert after_metric != before
     finally:
         store["metrics"].pop("write_probe", None)
-        store["message_count"] = original_message_count
+        for key, value in original_debug_values.items():
+            store[key] = value
         store.write_enabled = original_enabled
         store.save()
 
