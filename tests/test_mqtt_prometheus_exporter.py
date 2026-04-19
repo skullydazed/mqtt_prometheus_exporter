@@ -431,7 +431,13 @@ def test_store_excludes_debug_keys_from_write_triggers():
             after_excluded = f.read()
         assert after_excluded == before
 
-        store["metrics"]["write_probe"] = {"name": "write_probe", "labels": {}, "ts": time.time(), "ttl": 60, "value": 1.0}
+        store["metrics"]["write_probe"] = {
+            "name": "write_probe",
+            "labels": {},
+            "ts": time.time(),
+            "ttl": 60,
+            "value": 1.0,
+        }
         with open(store_path) as f:
             after_metric = f.read()
         assert after_metric != before
