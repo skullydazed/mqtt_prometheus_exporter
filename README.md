@@ -34,7 +34,7 @@ All settings are environment variables:
 | `MQTT_PASS` | *(empty)* | MQTT password |
 | `STORE_PATH` | `store.json` | Path to persistent metric store |
 | `TTL_DEFAULT` | `300` | Default metric TTL in seconds |
-| `STORE_WRITE_INTERVAL` | `30` | Interval in seconds for periodic manual store flushes |
+| `STORE_WRITE_INTERVAL` | `30` | Interval in seconds for periodic store writes |
 | `HTTP_HOST` | `127.0.0.1` | HTTP server bind address |
 | `HTTP_PORT` | `5023` | HTTP server port |
 

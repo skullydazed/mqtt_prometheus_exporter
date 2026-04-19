@@ -8,10 +8,7 @@ from .store import store
 
 @app.thread()
 def flush_store():
-    interval = max(STORE_WRITE_INTERVAL, 1.0)
-    if interval != STORE_WRITE_INTERVAL:
-        logging.warning("STORE_WRITE_INTERVAL must be >= 1.0; using %.1f", interval)
-
+    interval = STORE_WRITE_INTERVAL
     logging.info("Periodic store writer started (interval=%.1fs)", interval)
     while True:
         time.sleep(interval)
